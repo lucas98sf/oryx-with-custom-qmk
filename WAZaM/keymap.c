@@ -7,8 +7,23 @@
 
 enum custom_keycodes {
   RGB_SLD = ZSA_SAFE_RANGE,
+  PLAY_EVANGELION,
 };
 
+// Opening melody excerpt transcribed from the score the user supplied.
+// Durations use 1/64-beat units; playback sets the score's tempo of 76 BPM.
+float evangelion_theme[][2] = SONG(
+  M__NOTE(_DF5, 64), M__NOTE(_EF5, 64),
+  M__NOTE(_F5, 48), M__NOTE(_EF5, 48), M__NOTE(_F5, 32),
+  M__NOTE(_F5, 32), M__NOTE(_F5, 32), M__NOTE(_AF5, 32), M__NOTE(_G5, 32),
+  M__NOTE(_F5, 16), M__NOTE(_EF5, 32), M__NOTE(_G5, 48), M__NOTE(_REST, 16),
+  M__NOTE(_G5, 64), M__NOTE(_AF5, 64), M__NOTE(_BF5, 48),
+  M__NOTE(_F5, 48), M__NOTE(_EF5, 32),
+  M__NOTE(_AF5, 32), M__NOTE(_AF5, 32), M__NOTE(_G5, 32), M__NOTE(_AF5, 32),
+  M__NOTE(_AF5, 48), M__NOTE(_BF5, 16), M__NOTE(_BF5, 141)
+);
+
+static bool evangelion_tempo_active = false;
 
 
 
@@ -22,7 +37,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     KC_SPACE,       KC_BSPC,        KC_DELETE,                      MO(1),          KC_BSPC,        KC_ENTER
   ),
   [1] = LAYOUT_moonlander(
-    KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,                                          KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,          
+    KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,                                          KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,          PLAY_EVANGELION,
     KC_NO,          KC_NO,          KC_MS_UP,       KC_NO,          KC_NO,          KC_NO,          KC_NO,                                          KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,          
     KC_NO,          KC_MS_LEFT,     KC_MS_DOWN,     KC_MS_RIGHT,    KC_NO,          KC_NO,          KC_NO,                                                                          KC_NO,          KC_NO,          KC_MS_WH_UP,    KC_NO,          KC_NO,          KC_NO,          KC_NO,          
     KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,          KC_NO,                                          KC_MS_WH_LEFT,  KC_MS_WH_DOWN,  KC_MS_WH_RIGHT, KC_NO,          KC_NO,          KC_NO,          
@@ -81,8 +96,38 @@ void set_layer_color(int layer) {
 }
 
 bool rgb_matrix_indicators_user(void) {
+  if (!audio_is_playing_melody() && evangelion_tempo_active) {
+    audio_set_tempo(120);
+    evangelion_tempo_active = false;
+  }
   if (rawhid_state.rgb_control) {
       return false;
+  }
+  if (audio_is_playing_melody()) {
+    uint16_t step = timer_read() / 100;
+    uint8_t pulse = step % 32;
+    if (pulse > 15) {
+      pulse = 31 - pulse;
+    }
+    uint8_t value = 120 + pulse * 8;
+
+    for (int i = 0; i < RGB_MATRIX_LED_COUNT; i++) {
+      HSV hsv = {.s = 255, .v = value};
+      switch ((i / 5 + step / 3) % 3) {
+        case 0:
+          hsv.h = 205;  // EVA purple
+          break;
+        case 1:
+          hsv.h = 88;   // EVA green
+          break;
+        default:
+          hsv.h = 222;  // violet accent
+          break;
+      }
+      RGB rgb = hsv_to_rgb_with_value(hsv);
+      rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+    }
+    return true;
   }
   if (!keyboard_config.disable_layer_led) { 
     switch (biton32(layer_state)) {
@@ -137,6 +182,20 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
         }
         if (record->event.pressed) {
             rgblight_mode(1);
+        }
+        return false;
+
+    case PLAY_EVANGELION:
+        if (record->event.pressed) {
+            if (audio_is_playing_melody()) {
+                audio_stop_all();
+                audio_set_tempo(120);
+                evangelion_tempo_active = false;
+            } else {
+                audio_set_tempo(76);
+                evangelion_tempo_active = true;
+                PLAY_SONG(evangelion_theme);
+            }
         }
         return false;
   }
